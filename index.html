@@ -1,521 +1,837 @@
-import React, { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
-import _ from 'lodash';
-
-// Importer le calculateur de point de rosée
-function calculateDewPoint(temp, rh) {
-    // Si la température est négative, utiliser la formule du point de givrage
-    if (temp < 0) {
-        // Conversion en kelvin pour la formule
-        const T = temp + 273.15;
-        const Trose = T;
-        
-        // Formule du point de givrage
-        const Tgivre = Trose - T + (2671.02 / ((2954.61 / T) + 2.193665 * Math.log(T) - 13.3448));
-        
-        // Conversion de kelvin à celsius
-        return Tgivre - 273.15;
-    }
-    
-    // Pour les températures positives, utiliser la table de pression de saturation
-    // Table de pression de saturation de vapeur d'eau (simplifiée)
-    const saturationTable = [
-        { temp: 0, pressure: 6.11 },
-        { temp: 2, pressure: 7.06 },
-        { temp: 4, pressure: 8.13 },
-        { temp: 6, pressure: 9.35 },
-        { temp: 8, pressure: 10.73 },
-        { temp: 10, pressure: 12.28 },
-        { temp: 12, pressure: 14.02 },
-        { temp: 14, pressure: 15.98 },
-        { temp: 16, pressure: 18.18 },
-        { temp: 18, pressure: 20.63 },
-        { temp: 20, pressure: 23.38 },
-        { temp: 21, pressure: 24.87 },
-        { temp: 22, pressure: 26.43 },
-        { temp: 24, pressure: 29.83 },
-        { temp: 26, pressure: 33.6 },
-        { temp: 28, pressure: 37.8 },
-        { temp: 30, pressure: 42.43 },
-        { temp: 35, pressure: 56.23 },
-        { temp: 40, pressure: 73.75 },
-        { temp: 45, pressure: 95.83 },
-        { temp: 50, pressure: 123.34 },
-        { temp: 55, pressure: 157.37 },
-        { temp: 60, pressure: 199.16 },
-        { temp: 65, pressure: 250.03 }
-    ];
-    
-    // Calculer la pression de vapeur d'eau
-    function getSaturationPressure(temperature) {
-        // Trouver les deux points les plus proches dans la table
-        let lowerPoint = saturationTable[0];
-        let upperPoint = saturationTable[saturationTable.length - 1];
-        
-        for (let i = 0; i < saturationTable.length; i++) {
-            if (saturationTable[i].temp <= temperature) {
-                lowerPoint = saturationTable[i];
-            }
-            if (saturationTable[i].temp >= temperature && saturationTable[i].temp < upperPoint.temp) {
-                upperPoint = saturationTable[i];
-            }
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculateur du Point de Rosée</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
         }
-        
-        // Si les températures sont égales (par exemple, température exacte dans la table)
-        if (lowerPoint.temp === upperPoint.temp) {
-            return lowerPoint.pressure;
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
         }
-        
-        // Interpolation linéaire
-        const ratio = (temperature - lowerPoint.temp) / (upperPoint.temp - lowerPoint.temp);
-        return lowerPoint.pressure + ratio * (upperPoint.pressure - lowerPoint.pressure);
-    }
-    
-    // Calculer la pression de vapeur d'eau actuelle
-    const saturationPressure = getSaturationPressure(temp);
-    const vaporPressure = (rh / 100) * saturationPressure;
-    
-    // Trouver la température de rosée (température à laquelle la pression de saturation = pression de vapeur actuelle)
-    let dewPoint = -60; // Démarrer avec une valeur basse
-    
-    // Recherche par incréments de 0.1°C
-    while (dewPoint < 65) {
-        const pressureAtDewPoint = getSaturationPressure(dewPoint);
-        if (Math.abs(pressureAtDewPoint - vaporPressure) < 0.01) {
-            break;
+        h1, h2, h3 {
+            margin-top: 0;
+            color: #1a202c;
         }
-        if (pressureAtDewPoint > vaporPressure) {
-            // Ajuster pour plus de précision
-            dewPoint -= 0.1;
-            break;
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
         }
-        dewPoint += 0.1;
-    }
-    
-    return Math.round(dewPoint * 10) / 10; // Arrondir à 0.1 près
-}
-
-// Fonction pour trouver la position du point de rosée
-function findDewPointPosition(temperatures, positions, dewPoint) {
-    let dewPointFound = false;
-    let dewPointPosition = null;
-    let dewPointMaterialIndex = null;
-    
-    for (let i = 0; i < temperatures.length - 1; i++) {
-        // Si le point de rosée est entre deux températures
-        if ((temperatures[i] <= dewPoint && temperatures[i+1] >= dewPoint) ||
-            (temperatures[i] >= dewPoint && temperatures[i+1] <= dewPoint)) {
-            dewPointFound = true;
-            
-            // Interpolation linéaire pour trouver la position exacte
-            const ratio = Math.abs((dewPoint - temperatures[i]) / (temperatures[i+1] - temperatures[i]));
-            dewPointPosition = positions[i] + ratio * (positions[i+1] - positions[i]);
-            dewPointMaterialIndex = i;
-            break;
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
         }
-    }
-    
-    return {
-        found: dewPointFound,
-        position: dewPointPosition,
-        materialIndex: dewPointMaterialIndex
-    };
-}
-
-const TemperatureGradientChart = () => {
-    // États pour les paramètres
-    const [tempExt, setTempExt] = useState(-26);
-    const [tempInt, setTempInt] = useState(21);
-    const [humidity, setHumidity] = useState(40);
-    const [materials, setMaterials] = useState([]);
-    const [chartData, setChartData] = useState([]);
-    const [dewPoint, setDewPoint] = useState(null);
-    const [dewPointPosition, setDewPointPosition] = useState(null);
-    const [dewPointMaterial, setDewPointMaterial] = useState(null);
-    const [totalRsi, setTotalRsi] = useState(0);
-    const [showWarning, setShowWarning] = useState(false);
-    
-    // Base de données des matériaux simplifiée
-    const materialsDatabase = {
-        air: [
-            { id: 'air-int', name: "Film d'air intérieur (vertical)", rsi: 0.12, thickness: 0 },
-            { id: 'air-ext', name: "Film d'air extérieur", rsi: 0.03, thickness: 0 },
-            { id: 'air-gap', name: "Lame d'air non réfléch. (20mm)", rsi: 0.18, thickness: 20 }
-        ],
-        insulation: [
-            { id: 'ins-glass', name: "Laine de fibre de verre", rsiPerMm: 0.0208, thickness: 89 },
-            { id: 'ins-rock', name: "Laine de roche", rsiPerMm: 0.0276, thickness: 89 },
-            { id: 'ins-eps2', name: "Polystyrène expansé Type 2", rsiPerMm: 0.0277, thickness: 25 },
-            { id: 'ins-xps', name: "Polystyrène extrudé", rsiPerMm: 0.0343, thickness: 25 }
-        ],
-        structure: [
-            { id: 'str-conc', name: "Béton normal", rsiPerMm: 0.00040, thickness: 200 },
-            { id: 'str-wood', name: "Bois de construction", rsiPerMm: 0.0085, thickness: 38 },
-            { id: 'str-osb', name: "Panneaux OSB", rsiPerMm: 0.0098, thickness: 11 }
-        ],
-        finish: [
-            { id: 'fin-gyp', name: "Plaque de plâtre", rsiPerMm: 0.0063, thickness: 13 }
-        ],
-        exterior: [
-            { id: 'ext-brick', name: "Brique d'argile", rsi: 0.07, thickness: 90 },
-            { id: 'ext-vinyl', name: "Parement métallique", rsi: 0.11, thickness: 0 }
-        ]
-    };
-    
-    // Exemple de composition typique pour démonstration
-    useEffect(() => {
-        // Créer une composition de mur typique
-        const exampleWall = [
-            { ...materialsDatabase.air[1], id: 'example-1' }, // Air extérieur
-            { ...materialsDatabase.exterior[0], id: 'example-2' }, // Brique
-            { ...materialsDatabase.air[2], id: 'example-3' }, // Lame d'air
-            { 
-                ...materialsDatabase.insulation[2], 
-                id: 'example-4',
-                rsi: materialsDatabase.insulation[2].rsiPerMm * 25 // Calculer RSI basé sur l'épaisseur
-            },
-            { 
-                ...materialsDatabase.structure[2], 
-                id: 'example-5',
-                rsi: materialsDatabase.structure[2].rsiPerMm * 11
-            },
-            { 
-                ...materialsDatabase.insulation[0], 
-                id: 'example-6',
-                thickness: 140,
-                rsi: materialsDatabase.insulation[0].rsiPerMm * 140
-            },
-            { 
-                ...materialsDatabase.finish[0], 
-                id: 'example-7',
-                rsi: materialsDatabase.finish[0].rsiPerMm * 13
-            },
-            { ...materialsDatabase.air[0], id: 'example-8' } // Air intérieur
-        ];
-        
-        setMaterials(exampleWall);
-    }, []);
-    
-    // Calculer le gradient de température et le point de rosée
-    const calculateGradient = () => {
-        if (materials.length === 0) {
-            return;
+        .form-group {
+            margin-bottom: 15px;
         }
-        
-        // Calculer le point de rosée
-        const dewPointTemp = calculateDewPoint(tempInt, humidity);
-        setDewPoint(dewPointTemp);
-        
-        // Calculer la résistance thermique totale
-        const rsiTotal = materials.reduce((sum, material) => sum + material.rsi, 0);
-        setTotalRsi(rsiTotal);
-        
-        // Calculer le gradient de température
-        const tempDiff = tempInt - tempExt;
-        const positions = [0];
-        const temps = [tempExt];
-        let cumulPosition = 0;
-        let cumulTemp = tempExt;
-        
-        const data = [];
-        data.push({
-            position: 0,
-            temperature: tempExt,
-            name: "Extérieur"
-        });
-        
-        // Calculer la température à chaque interface
-        materials.forEach((material, index) => {
-            const deltaT = (material.rsi / rsiTotal) * tempDiff;
-            cumulTemp += deltaT;
-            cumulPosition += material.thickness;
-            
-            positions.push(cumulPosition);
-            temps.push(cumulTemp);
-            
-            data.push({
-                position: cumulPosition,
-                temperature: cumulTemp,
-                name: material.name
-            });
-        });
-        
-        // Vérifier si le point de rosée tombe dans la composition
-        const dewPointInfo = findDewPointPosition(temps, positions, dewPointTemp);
-        
-        if (dewPointInfo.found) {
-            setDewPointPosition(dewPointInfo.position);
-            setDewPointMaterial(materials[dewPointInfo.materialIndex].name);
-            setShowWarning(true);
-        } else {
-            setDewPointPosition(null);
-            setDewPointMaterial(null);
-            setShowWarning(false);
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 0.875rem;
+            color: #4a5568;
         }
-        
-        setChartData(data);
-    };
-    
-    // Calculer le gradient au chargement et quand les paramètres changent
-    useEffect(() => {
-        calculateGradient();
-    }, [materials, tempExt, tempInt, humidity]);
-    
-    // Fonction pour ajouter un matériau (pour démonstration)
-    const addMaterial = (category, id) => {
-        const material = {...materialsDatabase[category].find(m => m.id === id)};
-        
-        // Calculer le RSI si basé sur l'épaisseur
-        if (material.rsiPerMm) {
-            material.rsi = material.rsiPerMm * material.thickness;
+        input, select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            font-size: 1rem;
         }
-        
-        material.id = `custom-${Date.now()}`;
-        setMaterials([...materials, material]);
-    };
-    
-    const removeMaterial = (index) => {
-        const newMaterials = [...materials];
-        newMaterials.splice(index, 1);
-        setMaterials(newMaterials);
-    };
-    
-    // Générer une couleur par nom de matériau
-    const generateColorFromString = (str) => {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        button {
+            background-color: #4299e1;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
         }
-        let color = '#';
-        for (let i = 0; i < 3; i++) {
-            const value = (hash >> (i * 8)) & 0xFF;
-            color += ('00' + value.toString(16)).substr(-2);
+        button:hover {
+            background-color: #3182ce;
         }
-        return color;
-    };
-    
-    // Rendu de la visualisation des matériaux
-    const renderMaterialsVisualization = () => {
-        if (materials.length === 0) return null;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        th {
+            background-color: #f7fafc;
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        tr:hover {
+            background-color: #f7fafc;
+        }
+        .warning {
+            background-color: #fff8e1;
+            border-left: 4px solid #f59e0b;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .material-viz {
+            display: flex;
+            height: 60px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        .material-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75rem;
+            text-align: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .material-segment span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            padding: 0 4px;
+        }
+        .dewpoint-marker {
+            position: absolute;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background-color: red;
+            z-index: 10;
+            border-left: 2px dashed red;
+        }
+        .chart-container {
+            width: 100%;
+            height: 400px;
+            margin-bottom: 20px;
+            position: relative;
+            border: 1px solid #e2e8f0;
+            background-color: white;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #chart {
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            max-width: 100%;
+        }
+        .btn-remove {
+            background-color: #e53e3e;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .btn-remove:hover {
+            background-color: #c53030;
+        }
+        .materials-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .material-category {
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .material-category h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        .material-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background-color: #ebf8ff;
+            border: none;
+            padding: 8px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+        .material-btn:hover {
+            background-color: #bee3f8;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Calculateur du Point de Rosée</h1>
         
-        const totalWidth = materials.reduce((sum, m) => sum + m.thickness, 0);
-        
-        return (
-            <div className="flex mt-4 border border-gray-300 h-16 relative">
-                {materials.map((material, index) => {
-                    const width = material.thickness === 0 ? 20 : material.thickness;
-                    const percentage = totalWidth > 0 ? (width / totalWidth) * 100 : 0;
-                    const backgroundColor = generateColorFromString(material.name);
-                    
-                    return (
-                        <div 
-                            key={material.id} 
-                            className="flex items-center justify-center text-center p-1 text-white text-xs overflow-hidden"
-                            style={{ 
-                                width: `${percentage}%`, 
-                                minWidth: '20px',
-                                backgroundColor,
-                                position: 'relative'
-                            }}
-                            title={`${material.name} - RSI: ${material.rsi.toFixed(2)}`}
-                        >
-                            <span className="truncate">{material.name}</span>
-                        </div>
-                    );
-                })}
-                
-                {dewPointPosition !== null && (
-                    <div 
-                        className="absolute top-0 bottom-0 w-1 bg-red-500 z-10"
-                        style={{ 
-                            left: `${(dewPointPosition / materials.reduce((sum, m) => sum + m.thickness, 0)) * 100}%`,
-                            borderLeft: '2px dashed red'
-                        }}
-                        title={`Point de rosée: ${dewPoint?.toFixed(1)}°C`}
-                    />
-                )}
-            </div>
-        );
-    };
-    
-    return (
-        <div className="p-4">
-            <div className="bg-white rounded-lg shadow p-4 mb-4">
-                <h2 className="text-xl font-bold mb-2">Paramètres</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Température extérieure (°C)</label>
-                        <input 
-                            type="number" 
-                            value={tempExt} 
-                            onChange={(e) => setTempExt(parseFloat(e.target.value))} 
-                            className="mt-1 p-2 border rounded w-full"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Température intérieure (°C)</label>
-                        <input 
-                            type="number" 
-                            value={tempInt} 
-                            onChange={(e) => setTempInt(parseFloat(e.target.value))} 
-                            className="mt-1 p-2 border rounded w-full"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Humidité relative intérieure (%)</label>
-                        <input 
-                            type="number" 
-                            value={humidity} 
-                            onChange={(e) => setHumidity(parseFloat(e.target.value))} 
-                            className="mt-1 p-2 border rounded w-full"
-                            min="0"
-                            max="100"
-                        />
-                    </div>
+        <div class="card">
+            <h2>Paramètres</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="temp-ext">Température extérieure (°C)</label>
+                    <input type="number" id="temp-ext" value="-26" step="0.1">
                 </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow p-4 mb-4">
-                <h2 className="text-xl font-bold mb-2">Gradient de température et point de rosée</h2>
-                <div className="mb-4">
-                    <div className="h-64 md:h-96">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart
-                                data={chartData}
-                                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="position" 
-                                    label={{ value: 'Position (mm)', position: 'insideBottomRight', offset: -10 }} 
-                                />
-                                <YAxis 
-                                    label={{ value: 'Température (°C)', angle: -90, position: 'insideLeft' }} 
-                                />
-                                <Tooltip 
-                                    formatter={(value, name) => [
-                                        `${value.toFixed(1)} °C`, 
-                                        name === 'temperature' ? 'Température' : name
-                                    ]}
-                                    labelFormatter={(value) => `Position: ${value} mm`}
-                                />
-                                <Legend />
-                                <Line 
-                                    type="monotone" 
-                                    dataKey="temperature" 
-                                    stroke="#1e88e5" 
-                                    strokeWidth={2} 
-                                    dot={{ r: 4 }} 
-                                    activeDot={{ r: 6 }} 
-                                    name="Température"
-                                />
-                                {dewPoint !== null && (
-                                    <ReferenceLine 
-                                        y={dewPoint} 
-                                        stroke="red" 
-                                        strokeDasharray="5 5" 
-                                        label={{ 
-                                            value: `Point de rosée (${dewPoint.toFixed(1)}°C)`, 
-                                            position: 'right',
-                                            fill: 'red'
-                                        }} 
-                                    />
-                                )}
-                                {dewPointPosition !== null && (
-                                    <ReferenceLine 
-                                        x={dewPointPosition} 
-                                        stroke="red" 
-                                        strokeDasharray="5 5"
-                                    />
-                                )}
-                            </LineChart>
-                        </ResponsiveContainer>
-                    </div>
-                    
-                    {renderMaterialsVisualization()}
-                    
-                    {showWarning && (
-                        <div className="mt-4 p-3 bg-yellow-100 text-yellow-800 rounded">
-                            <strong>Attention:</strong> Point de rosée ({dewPoint?.toFixed(1)}°C) détecté dans 
-                            le matériau "{dewPointMaterial}". 
-                            Risque de condensation interne qui peut causer des problèmes d'humidité et de moisissure.
-                        </div>
-                    )}
-                    
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <p><strong>Point de rosée:</strong> {dewPoint?.toFixed(1)}°C</p>
-                            <p><strong>RSI total:</strong> {totalRsi.toFixed(2)} (R-{(totalRsi * 5.678).toFixed(1)})</p>
-                            <p><strong>Coefficient U:</strong> {(1/totalRsi).toFixed(3)} W/(m²·K)</p>
-                        </div>
-                        <div>
-                            <p className="text-sm text-gray-600">
-                                La température de part et d'autre de la paroi passe de {tempExt}°C à {tempInt}°C.
-                                Le point de rosée calculé est de {dewPoint?.toFixed(1)}°C à {humidity}% d'humidité relative.
-                                {dewPointPosition !== null ? 
-                                    ` Il y a risque de condensation dans le matériau "${dewPointMaterial}".` : 
-                                    " Aucun risque de condensation détecté dans cette composition."
-                                }
-                            </p>
-                        </div>
-                    </div>
+                <div class="form-group">
+                    <label for="temp-int">Température intérieure (°C)</label>
+                    <input type="number" id="temp-int" value="21" step="0.1">
                 </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow p-4">
-                <h2 className="text-xl font-bold mb-2">Composition de l'enveloppe</h2>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Matériau</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Épaisseur (mm)</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RSI</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">R</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {materials.map((material, index) => (
-                                <tr key={material.id}>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{material.name}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.thickness}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.rsi.toFixed(3)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(material.rsi * 5.678).toFixed(3)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <button 
-                                            onClick={() => removeMaterial(index)}
-                                            className="text-red-600 hover:text-red-900 mr-2"
-                                        >
-                                            Supprimer
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                        <tfoot>
-                            <tr className="bg-gray-50">
-                                <td className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</td>
-                                <td className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></td>
-                                <td className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{totalRsi.toFixed(3)}</td>
-                                <td className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{(totalRsi * 5.678).toFixed(3)}</td>
-                                <td className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-                
-                <div className="mt-4">
-                    <button 
-                        onClick={calculateGradient}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-                    >
-                        Recalculer
-                    </button>
+                <div class="form-group">
+                    <label for="humidity">Humidité relative intérieure (%)</label>
+                    <input type="number" id="humidity" value="40" min="0" max="100" step="1">
                 </div>
             </div>
         </div>
-    );
-};
+        
+        <div class="card">
+            <h2>Gradient de température et point de rosée</h2>
+            
+            <div class="chart-container">
+                <canvas id="chart"></canvas>
+            </div>
+            
+            <div class="material-viz" id="material-viz"></div>
+            
+            <div id="warning-container"></div>
+            
+            <div class="summary-grid">
+                <div>
+                    <p><strong>Point de rosée:</strong> <span id="dew-point">-</span> °C</p>
+                    <p><strong>RSI total:</strong> <span id="rsi-total">-</span> (R-<span id="r-total">-</span>)</p>
+                    <p><strong>Coefficient U:</strong> <span id="u-value">-</span> W/(m²·K)</p>
+                </div>
+                <div>
+                    <p id="summary-text" class="text-sm text-gray-600"></p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Composition de l'enveloppe</h2>
+            <div style="overflow-x: auto;">
+                <table id="materials-table">
+                    <thead>
+                        <tr>
+                            <th>Matériau</th>
+                            <th>Épaisseur (mm)</th>
+                            <th>RSI</th>
+                            <th>R</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="materials-body">
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th>Total</th>
+                            <th></th>
+                            <th id="footer-rsi">-</th>
+                            <th id="footer-r">-</th>
+                            <th></th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            
+            <h3>Ajouter des matériaux</h3>
+            <div class="materials-grid" id="materials-menu">
+                <!-- Rempli par JavaScript -->
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <button id="recalculate-btn">Recalculer</button>
+            </div>
+        </div>
+    </div>
 
-export default TemperatureGradientChart;
+    <script>
+        // Table de pression de saturation de vapeur d'eau
+        const saturationTable = [
+            { temp: -60, pressure: 0.001 },
+            { temp: -40, pressure: 0.13 },
+            { temp: -20, pressure: 1.03 },
+            { temp: -18, pressure: 1.5 },
+            { temp: -15, pressure: 1.9 },
+            { temp: -12, pressure: 2.4 },
+            { temp: -10, pressure: 2.6 },
+            { temp: -9, pressure: 3.0 },
+            { temp: -7, pressure: 3.7 },
+            { temp: -4, pressure: 4.6 },
+            { temp: -1, pressure: 5.6 },
+            { temp: 0, pressure: 6.11 },
+            { temp: 2, pressure: 7.06 },
+            { temp: 4, pressure: 8.13 },
+            { temp: 6, pressure: 9.35 },
+            { temp: 8, pressure: 10.73 },
+            { temp: 10, pressure: 12.28 },
+            { temp: 11, pressure: 13.12 },
+            { temp: 12, pressure: 14.02 },
+            { temp: 13, pressure: 14.97 },
+            { temp: 14, pressure: 15.98 },
+            { temp: 15, pressure: 17.05 },
+            { temp: 16, pressure: 18.18 },
+            { temp: 17, pressure: 19.37 },
+            { temp: 18, pressure: 20.63 },
+            { temp: 19, pressure: 21.97 },
+            { temp: 20, pressure: 23.38 },
+            { temp: 21, pressure: 24.87 },
+            { temp: 22, pressure: 26.43 },
+            { temp: 23, pressure: 28.09 },
+            { temp: 24, pressure: 29.83 },
+            { temp: 25, pressure: 31.67 },
+            { temp: 26, pressure: 33.6 },
+            { temp: 27, pressure: 35.64 },
+            { temp: 28, pressure: 37.8 },
+            { temp: 29, pressure: 40.05 },
+            { temp: 30, pressure: 42.43 },
+            { temp: 31, pressure: 44.92 },
+            { temp: 32, pressure: 47.55 },
+            { temp: 33, pressure: 50.3 },
+            { temp: 34, pressure: 53.19 },
+            { temp: 35, pressure: 56.23 },
+            { temp: 36, pressure: 59.41 },
+            { temp: 37, pressure: 62.75 },
+            { temp: 38, pressure: 66.25 },
+            { temp: 39, pressure: 69.92 },
+            { temp: 40, pressure: 73.75 },
+            { temp: 45, pressure: 95.83 },
+            { temp: 50, pressure: 123.34 },
+            { temp: 55, pressure: 157.37 },
+            { temp: 60, pressure: 199.16 },
+            { temp: 65, pressure: 250.03 }
+        ];
+
+        // Base de données des matériaux
+        const materialsDatabase = {
+            air: [
+                { id: 'air-int', name: "Pellicule d'air de surface intérieure", rsi: 0.12, thickness: 0 },
+                { id: 'air-ext', name: "Pellicule d'air de surface extérieure", rsi: 0.03, thickness: 0 },
+                { id: 'air-gap-v', name: "Air stable, surface verticale", rsi: 0.15, thickness: 20 }
+            ],
+            insulation: [
+                { id: 'ins-glass', name: "Laine de fibre de verre", rsiPerMm: 0.0208, thickness: 89 },
+                { id: 'ins-rock', name: "Laine de roche", rsiPerMm: 0.0276, thickness: 140 },
+                { id: 'ins-eps2', name: "Polystyrène expansé Type 2", rsiPerMm: 0.0277, thickness: 50 },
+                { id: 'ins-xps', name: "Polystyrène extrudé", rsiPerMm: 0.0343, thickness: 25 }
+            ],
+            structure: [
+                { id: 'str-conc', name: "Béton normal", rsiPerMm: 0.00040, thickness: 200 },
+                { id: 'str-wood', name: "Bois de construction", rsiPerMm: 0.0085, thickness: 38 },
+                { id: 'str-osb', name: "Panneaux OSB ou contreplaqué", rsiPerMm: 0.0098, thickness: 11 }
+            ],
+            finish: [
+                { id: 'fin-gyp', name: "Plaque de plâtre (gypse)", rsiPerMm: 0.0063, thickness: 13 }
+            ],
+            exterior: [
+                { id: 'ext-brick', name: "Brique d'argile ou schiste", rsiPerMm: 0.00078, thickness: 90 },
+                { id: 'ext-vinyl', name: "Parement métallique", rsi: 0.11, thickness: 0 }
+            ]
+        };
+
+        let materials = [];
+        let chart = null;
+
+        // Fonction pour calculer le point de rosée
+        function calculateDewPoint(temp, rh) {
+            // Calculer la pression de vapeur d'eau
+            function getSaturationPressure(temperature) {
+                // Trouver les deux points les plus proches dans la table
+                let lowerPoint = saturationTable[0];
+                let upperPoint = saturationTable[saturationTable.length - 1];
+                
+                for (let i = 0; i < saturationTable.length; i++) {
+                    if (saturationTable[i].temp <= temperature) {
+                        lowerPoint = saturationTable[i];
+                    }
+                    if (saturationTable[i].temp >= temperature && saturationTable[i].temp < upperPoint.temp) {
+                        upperPoint = saturationTable[i];
+                    }
+                }
+                
+                // Si les températures sont égales (par exemple, température exacte dans la table)
+                if (lowerPoint.temp === upperPoint.temp) {
+                    return lowerPoint.pressure;
+                }
+                
+                // Interpolation linéaire
+                const ratio = (temperature - lowerPoint.temp) / (upperPoint.temp - lowerPoint.temp);
+                return lowerPoint.pressure + ratio * (upperPoint.pressure - lowerPoint.pressure);
+            }
+            
+            // Calculer la pression de vapeur d'eau actuelle
+            const saturationPressure = getSaturationPressure(temp);
+            const vaporPressure = (rh / 100) * saturationPressure;
+            
+            // Trouver la température de rosée (température à laquelle la pression de saturation = pression de vapeur actuelle)
+            let dewPoint = -60; // Démarrer avec une valeur basse
+            
+            // Recherche par incréments de 0.1°C
+            while (dewPoint < 65) {
+                const pressureAtDewPoint = getSaturationPressure(dewPoint);
+                if (Math.abs(pressureAtDewPoint - vaporPressure) < 0.01) {
+                    break;
+                }
+                if (pressureAtDewPoint > vaporPressure) {
+                    // Ajuster pour plus de précision
+                    dewPoint -= 0.1;
+                    break;
+                }
+                dewPoint += 0.1;
+            }
+            
+            return Math.round(dewPoint * 10) / 10; // Arrondir à 0.1 près
+        }
+
+        // Fonction pour trouver la position du point de rosée
+        function findDewPointPosition(temperatures, positions, dewPoint) {
+            let dewPointFound = false;
+            let dewPointPosition = null;
+            let dewPointMaterialIndex = null;
+            
+            for (let i = 0; i < temperatures.length - 1; i++) {
+                // Si le point de rosée est entre deux températures
+                if ((temperatures[i] <= dewPoint && temperatures[i+1] >= dewPoint) ||
+                    (temperatures[i] >= dewPoint && temperatures[i+1] <= dewPoint)) {
+                    dewPointFound = true;
+                    
+                    // Interpolation linéaire pour trouver la position exacte
+                    const ratio = Math.abs((dewPoint - temperatures[i]) / (temperatures[i+1] - temperatures[i]));
+                    dewPointPosition = positions[i] + ratio * (positions[i+1] - positions[i]);
+                    dewPointMaterialIndex = i;
+                    break;
+                }
+            }
+            
+            return {
+                found: dewPointFound,
+                position: dewPointPosition,
+                materialIndex: dewPointMaterialIndex
+            };
+        }
+
+        // Générer une couleur à partir d'une chaîne
+        function generateColorFromString(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            let color = '#';
+            for (let i = 0; i < 3; i++) {
+                const value = (hash >> (i * 8)) & 0xFF;
+                color += ('00' + value.toString(16)).substr(-2);
+            }
+            return color;
+        }
+
+        // Initialiser le graphique
+        function initChart() {
+            const ctx = document.getElementById('chart').getContext('2d');
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Température (°C)',
+                        data: [],
+                        borderColor: '#1e88e5',
+                        backgroundColor: 'rgba(30, 136, 229, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Position (mm)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Température (°C)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        annotation: {
+                            annotations: []
+                        }
+                    }
+                }
+            });
+        }
+
+        // Mettre à jour le graphique avec les nouvelles données
+        function updateChart(positions, temperatures, dewPoint, dewPointPosition) {
+            chart.data.labels = positions;
+            chart.data.datasets[0].data = temperatures;
+            
+            // Ajouter la ligne horizontale pour le point de rosée
+            chart.options.plugins.annotation = {
+                annotations: {}
+            };
+            
+            if (dewPoint !== null) {
+                chart.options.plugins.annotation.annotations.dewPointLine = {
+                    type: 'line',
+                    yMin: dewPoint,
+                    yMax: dewPoint,
+                    borderColor: 'red',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    label: {
+                        content: `Point de rosée (${dewPoint.toFixed(1)}°C)`,
+                        position: 'right',
+                        color: 'red',
+                        enabled: true
+                    }
+                };
+            }
+            
+            if (dewPointPosition !== null) {
+                chart.options.plugins.annotation.annotations.dewPointPosition = {
+                    type: 'line',
+                    xMin: dewPointPosition,
+                    xMax: dewPointPosition,
+                    borderColor: 'red',
+                    borderWidth: 2,
+                    borderDash: [5, 5]
+                };
+            }
+            
+            chart.update();
+        }
+
+        // Calculer le gradient de température
+        function calculateGradient() {
+            const tempExt = parseFloat(document.getElementById('temp-ext').value);
+            const tempInt = parseFloat(document.getElementById('temp-int').value);
+            const humidity = parseFloat(document.getElementById('humidity').value);
+            
+            if (materials.length === 0) {
+                return;
+            }
+            
+            // Calculer le point de rosée
+            const dewPointTemp = calculateDewPoint(tempInt, humidity);
+            document.getElementById('dew-point').textContent = dewPointTemp.toFixed(1);
+            
+            // Calculer la résistance thermique totale
+            const rsiTotal = materials.reduce((sum, material) => sum + material.rsi, 0);
+            document.getElementById('rsi-total').textContent = rsiTotal.toFixed(2);
+            document.getElementById('r-total').textContent = (rsiTotal * 5.678).toFixed(1);
+            document.getElementById('u-value').textContent = (1/rsiTotal).toFixed(3);
+            
+            // Mettre à jour les totaux dans le footer du tableau
+            document.getElementById('footer-rsi').textContent = rsiTotal.toFixed(3);
+            document.getElementById('footer-r').textContent = (rsiTotal * 5.678).toFixed(3);
+            
+            // Calculer le gradient de température
+            const tempDiff = tempInt - tempExt;
+            const positions = [0];
+            const temps = [tempExt];
+            let cumulPosition = 0;
+            let cumulTemp = tempExt;
+            
+            // Calculer la température à chaque interface
+            materials.forEach((material) => {
+                const deltaT = (material.rsi / rsiTotal) * tempDiff;
+                cumulTemp += deltaT;
+                cumulPosition += material.thickness;
+                
+                positions.push(cumulPosition);
+                temps.push(cumulTemp);
+            });
+            
+            // Mettre à jour le graphique
+            updateChart(positions, temps, dewPointTemp, null);
+            
+            // Vérifier si le point de rosée tombe dans la composition
+            const dewPointInfo = findDewPointPosition(temps, positions, dewPointTemp);
+            
+            // Mettre à jour la visualisation des matériaux
+            renderMaterialsVisualization(dewPointInfo.position);
+            
+            // Afficher ou masquer l'avertissement
+            const warningContainer = document.getElementById('warning-container');
+            warningContainer.innerHTML = '';
+            
+            if (dewPointInfo.found) {
+                const dewPointMaterial = materials[dewPointInfo.materialIndex].name;
+                
+                warningContainer.innerHTML = `
+                    <div class="warning">
+                        <strong>Attention:</strong> Point de rosée (${dewPointTemp.toFixed(1)}°C) détecté dans 
+                        le matériau "${dewPointMaterial}". 
+                        Risque de condensation interne qui peut causer des problèmes d'humidité et de moisissure.
+                    </div>
+                `;
+                
+                // Mettre à jour le graphique avec la position du point de rosée
+                updateChart(positions, temps, dewPointTemp, dewPointInfo.position);
+                
+                // Mettre à jour le texte de résumé
+                document.getElementById('summary-text').textContent = 
+                    `La température de part et d'autre de la paroi passe de ${tempExt}°C à ${tempInt}°C. ` +
+                    `Le point de rosée calculé est de ${dewPointTemp.toFixed(1)}°C à ${humidity}% d'humidité relative. ` +
+                    `Il y a risque de condensation dans le matériau "${dewPointMaterial}".`;
+            } else {
+                document.getElementById('summary-text').textContent = 
+                    `La température de part et d'autre de la paroi passe de ${tempExt}°C à ${tempInt}°C. ` +
+                    `Le point de rosée calculé est de ${dewPointTemp.toFixed(1)}°C à ${humidity}% d'humidité relative. ` +
+                    `Aucun risque de condensation détecté dans cette composition.`;
+            }
+        }
+
+        // Rendre la visualisation des matériaux
+        function renderMaterialsVisualization(dewPointPosition = null) {
+            const container = document.getElementById('material-viz');
+            container.innerHTML = '';
+            
+            if (materials.length === 0) return;
+            
+            const totalWidth = materials.reduce((sum, m) => sum + m.thickness, 0);
+            
+            materials.forEach(material => {
+                const width = material.thickness === 0 ? 20 : material.thickness;
+                const percentage = totalWidth > 0 ? (width / totalWidth) * 100 : 0;
+                const backgroundColor = generateColorFromString(material.name);
+                
+                const div = document.createElement('div');
+                div.className = 'material-segment';
+                div.style.width = `${percentage}%`;
+                div.style.minWidth = '20px';
+                div.style.backgroundColor = backgroundColor;
+                div.title = `${material.name} - RSI: ${material.rsi.toFixed(2)}`;
+                
+                const span = document.createElement('span');
+                span.textContent = material.name;
+                div.appendChild(span);
+                
+                container.appendChild(div);
+            });
+            
+            // Ajouter le marqueur du point de rosée si présent
+            if (dewPointPosition !== null) {
+                const marker = document.createElement('div');
+                marker.className = 'dewpoint-marker';
+                marker.style.left = `${(dewPointPosition / totalWidth) * 100}%`;
+                marker.title = 'Point de rosée';
+                container.appendChild(marker);
+            }
+        }
+
+        // Ajouter un matériau à la composition
+        function addMaterial(category, id) {
+            const materialBase = materialsDatabase[category].find(m => m.id === id);
+            if (!materialBase) return;
+            
+            const material = {...materialBase};
+            
+            // Calculer le RSI si basé sur l'épaisseur
+            if (material.rsiPerMm) {
+                material.rsi = material.rsiPerMm * material.thickness;
+            }
+            
+            material.id = `custom-${Date.now()}`;
+            materials.push(material);
+            
+            updateMaterialsTable();
+            calculateGradient();
+        }
+
+        // Supprimer un matériau de la composition
+        function removeMaterial(index) {
+            materials.splice(index, 1);
+            updateMaterialsTable();
+            calculateGradient();
+        }
+
+        // Mettre à jour le tableau des matériaux
+        function updateMaterialsTable() {
+            const tbody = document.getElementById('materials-body');
+            tbody.innerHTML = '';
+            
+            materials.forEach((material, index) => {
+                const tr = document.createElement('tr');
+                
+                const nameCell = document.createElement('td');
+                nameCell.textContent = material.name;
+                tr.appendChild(nameCell);
+                
+                const thicknessCell = document.createElement('td');
+                thicknessCell.textContent = material.thickness;
+                tr.appendChild(thicknessCell);
+                
+                const rsiCell = document.createElement('td');
+                rsiCell.textContent = material.rsi.toFixed(3);
+                tr.appendChild(rsiCell);
+                
+                const rCell = document.createElement('td');
+                rCell.textContent = (material.rsi * 5.678).toFixed(3);
+                tr.appendChild(rCell);
+                
+                const actionCell = document.createElement('td');
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'btn-remove';
+                removeBtn.textContent = 'Supprimer';
+                removeBtn.onclick = () => removeMaterial(index);
+                actionCell.appendChild(removeBtn);
+                tr.appendChild(actionCell);
+                
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Construire le menu des matériaux
+        function buildMaterialsMenu() {
+            const container = document.getElementById('materials-menu');
+            
+            const categories = {
+                'air': 'Films d\'air',
+                'insulation': 'Isolants',
+                'structure': 'Structure',
+                'finish': 'Finition',
+                'exterior': 'Revêtement extérieur'
+            };
+            
+            Object.entries(materialsDatabase).forEach(([category, categoryMaterials]) => {
+                const div = document.createElement('div');
+                div.className = 'material-category';
+                
+                const title = document.createElement('h3');
+                title.textContent = categories[category] || category;
+                div.appendChild(title);
+                
+                categoryMaterials.forEach(material => {
+                    const button = document.createElement('button');
+                    button.className = 'material-btn';
+                    button.textContent = material.name;
+                    button.onclick = () => addMaterial(category, material.id);
+                    div.appendChild(button);
+                });
+                
+                container.appendChild(div);
+            });
+        }
+
+        // Initialisation de l'exemple de mur
+        function initExampleWall() {
+            // Créer une composition de mur typique (similaire à l'exemple PDF)
+            materials = [
+                { 
+                    id: 'example-1', 
+                    name: "Pellicule d'air de surface (vent hivernal de 24 Km/h) - 1/4\"",
+                    rsi: 0.007,
+                    thickness: 0
+                },
+                { 
+                    id: 'example-2',
+                    name: "Brique d'argile ou schiste (4''nominal, 2400 kg/m3) - 3 1/2\"",
+                    rsi: 0.070,
+                    thickness: 90
+                },
+                { 
+                    id: 'example-3',
+                    name: "Pellicule d'air de surface (vent hivernal de 24 Km/h) - 1\" d'épaisseur",
+                    rsi: 0.030,
+                    thickness: 25
+                },
+                { 
+                    id: 'example-4',
+                    name: "Polystyrène expansé Type 2 - 2\" d'épaisseur",
+                    rsi: 1.407,
+                    thickness: 50
+                },
+                { 
+                    id: 'example-5',
+                    name: "Contreplaqué de bois tendre - 1/2\"",
+                    rsi: 0.166,
+                    thickness: 13
+                },
+                { 
+                    id: 'example-6',
+                    name: "Laine de roche - 5 1/2\"",
+                    rsi: 3.875,
+                    thickness: 140
+                },
+                { 
+                    id: 'example-7',
+                    name: "Air stable, surface verticale, flux thermique horizontal - 3/4\"",
+                    rsi: 0.090,
+                    thickness: 19
+                },
+                { 
+                    id: 'example-8',
+                    name: "Plaque de plâtre (panneaux de gypse) - 1/2\"",
+                    rsi: 0.077,
+                    thickness: 13
+                },
+                { 
+                    id: 'example-9',
+                    name: "Air stable, surface verticale, flux thermique horizontal - 1/4\"",
+                    rsi: 0.027,
+                    thickness: 6
+                }
+            ];
+            
+            updateMaterialsTable();
+        }
+
+        // Initialisation de l'application
+        document.addEventListener('DOMContentLoaded', function() {
+            initChart();
+            buildMaterialsMenu();
+            initExampleWall();
+            calculateGradient();
+            
+            // Événements
+            document.getElementById('recalculate-btn').addEventListener('click', calculateGradient);
+            
+            // Recalculer automatiquement lorsque les paramètres changent
+            document.getElementById('temp-ext').addEventListener('change', calculateGradient);
+            document.getElementById('temp-int').addEventListener('change', calculateGradient);
+            document.getElementById('humidity').addEventListener('change', calculateGradient);
+        });
+    </script>
+</body>
+</html>
